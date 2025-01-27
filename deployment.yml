@@ -1,0 +1,67 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: accounting
+  labels:
+    app: accounting
+  namespace: wallet
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: accounting
+  template:
+    metadata:
+      labels:
+        app: accounting
+      annotations:
+        prometheus.io/path: /metrics-path
+        prometheus.io/port: "8099"
+        prometheus.io/scrape: "true"
+    spec:
+      serviceAccountName: accounting
+      containers:
+        - name: accounting
+          image: nexus.bpmellat.com:8082/accounting:v.1.2.17
+          imagePullPolicy: "IfNotPresent"
+          volumeMounts:
+            - name: app-config
+              mountPath: /accounting/app-file
+              subPath: app-file
+              readOnly: true
+          envFrom:
+            - configMapRef:
+                name: configmap-general
+            - configMapRef:
+                name: accounting-env
+          ports:
+            - name: http-8099
+              containerPort: 8099
+          livenessProbe:
+            initialDelaySeconds: 30
+            periodSeconds: 30
+            failureThreshold: 3
+            successThreshold: 1
+            timeoutSeconds: 20
+            tcpSocket:
+              port: 8099
+          readinessProbe:
+            initialDelaySeconds: 30
+            periodSeconds: 5
+            failureThreshold: 1
+            successThreshold: 2
+            timeoutSeconds: 20
+            tcpSocket:
+              port: 8099
+          resources:
+            requests:
+              memory: "200Mi"
+              cpu: "200m"
+            limits:
+              memory: "2Gi"
+              cpu: "1000m"
+      volumes:
+        - name: app-config
+          configMap:
+            name: accounting-app-config
+
