@@ -1,0 +1,16 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: accounting-env
+  namespace: wallet
+data:
+
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: accounting-app-config
+  namespace: wallet
+data:
+  app-file: |
+    SERVER.PORT=8081
