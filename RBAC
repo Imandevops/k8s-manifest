@@ -1,0 +1,14 @@
+apiVersion: "rbac.authorization.k8s.io/v1"
+kind: "RoleBinding"
+metadata:
+  labels:
+    app: "accounting"
+  name: "accounting:view"
+  namespace: wallet
+roleRef:
+  kind: "ClusterRole"
+  apiGroup: "rbac.authorization.k8s.io"
+  name: "view"
+subjects:
+  - kind: "ServiceAccount"
+    name: "accounting"
