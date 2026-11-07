@@ -1,0 +1,330 @@
+# Requires Traefik CRDs: traefik.io/v1alpha1
+# EntryPoints: web / websecure
+# Certificate resolver: letsencrypt
+
+apiVersion: traefik.io/v1alpha1
+kind: Middleware
+metadata:
+  name: app-cors
+  namespace: max
+spec:
+  headers:
+    accessControlAllowCredentials: true
+    accessControlAllowMethods:
+      - GET
+      - POST
+      - PUT
+      - PATCH
+      - DELETE
+      - OPTIONS
+    accessControlAllowHeaders:
+      - Origin
+      - Content-Type
+      - Accept
+      - Authorization
+      - X-Requested-With
+      - x-device-id
+      - idempotency-key
+    accessControlExposeHeaders:
+      - Synapse-Trace-Id
+      - Server
+    accessControlMaxAge: 86400
+    accessControlAllowOriginListRegex:
+      - '^https?://localhost(:[0-9]+)?$'
+      - '^https?://127\.0\.0\.1(:[0-9]+)?$'
+      - '^https?://kubemax\.test\.ir$'
+      - '^https?://kubesynaps\.test\.ir$'
+      - '^https?://app\.dorret\.ir$'
+      - '^https?://devmaxlive\.test\.ir$'
+      - '^https?://app\.dev\.dorret\.ir$'
+      - '^https?://maxdash\.test\.ir$'
+      - '^https?://185\.79\.96\.251:3000$'
+      - '^https?://appmono\.dorret\.ir$'
+      - '^https?://apikubemax\.test\.ir$'
+    addVaryHeader: true
+---
+apiVersion: traefik.io/v1alpha1
+kind: Middleware
+metadata:
+  name: media-limit
+  namespace: max
+spec:
+  buffering:
+    maxRequestBodyBytes: 110100480
+    memRequestBodyBytes: 2097152
+---
+apiVersion: traefik.io/v1alpha1
+kind: Middleware
+metadata:
+  name: strip-livekit-sfu
+  namespace: max
+spec:
+  stripPrefix:
+    prefixes:
+      - /livekit/sfu
+---
+apiVersion: traefik.io/v1alpha1
+kind: Middleware
+metadata:
+  name: strip-livekit-jwt
+  namespace: max
+spec:
+  stripPrefix:
+    prefixes:
+      - /livekit/jwt
+---
+apiVersion: traefik.io/v1alpha1
+kind: Middleware
+metadata:
+  name: strip-jwt
+  namespace: max
+spec:
+  stripPrefix:
+    prefixes:
+      - /jwt
+---
+apiVersion: traefik.io/v1alpha1
+kind: Middleware
+metadata:
+  name: sfu-config-path
+  namespace: max
+spec:
+  replacePath:
+    path: /rtc/sfu-config
+---
+apiVersion: traefik.io/v1alpha1
+kind: Middleware
+metadata:
+  name: redirect-https
+  namespace: max
+spec:
+  redirectScheme:
+    scheme: https
+    permanent: true
+---
+apiVersion: traefik.io/v1alpha1
+kind: ServersTransport
+metadata:
+  name: long-lived
+  namespace: max
+spec:
+  forwardingTimeouts:
+    dialTimeout: 30s
+    responseHeaderTimeout: 3600s
+    idleConnTimeout: 3600s
+---
+apiVersion: traefik.io/v1alpha1
+kind: IngressRoute
+metadata:
+  name: kubesynaps
+  namespace: max
+spec:
+  entryPoints:
+    - websecure
+  tls:
+    certResolver: letsencrypt
+  routes:
+    - match: 'Host(`kubesynaps.test.ir`) && Path(`/.well-known/max/client`)'
+      kind: Rule
+      priority: 200
+      middlewares:
+        - name: app-cors
+      services:
+        - name: prodbackend
+          port: 9001
+
+    - match: 'Host(`kubesynaps.test.ir`) && PathRegexp(`^/_max/client/(r0|v3)/directory/list/room/`)'
+      kind: Rule
+      priority: 190
+      middlewares:
+        - name: app-cors
+      services:
+        - name: synapse-main
+          port: 8008
+
+    - match: 'Host(`kubesynaps.test.ir`) && PathPrefix(`/livekit/jwt/`)'
+      kind: Rule
+      priority: 190
+      middlewares:
+        - name: app-cors
+        - name: strip-livekit-jwt
+      services:
+        - name: prodbackend
+          port: 9001
+
+    - match: 'Host(`kubesynaps.test.ir`) && PathRegexp(`^/_max/client/.*/rtc/`)'
+      kind: Rule
+      priority: 180
+      middlewares:
+        - name: app-cors
+      services:
+        - name: prodbackend
+          port: 9001
+
+    - match: 'Host(`kubesynaps.test.ir`) && PathRegexp(`^/_max/client/(r0|v3)/rooms/.*/(read_markers$|receipt/|typing/)`)'
+      kind: Rule
+      priority: 175
+      middlewares:
+        - name: app-cors
+      services:
+        - name: stream-writer
+          port: 8008
+
+    - match: 'Host(`kubesynaps.test.ir`) && PathRegexp(`^/_max/client/(r0|v3)/(createRoom|join|leave|invite|kick|ban|unban|send|redact)`)'
+      kind: Rule
+      priority: 170
+      middlewares:
+        - name: app-cors
+      services:
+        - name: synapse-main
+          port: 8008
+
+    - match: 'Host(`kubesynaps.test.ir`) && PathRegexp(`^/_max/client/(v2_alpha|r0|v3)/(sync|events)$`)'
+      kind: Rule
+      priority: 165
+      middlewares:
+        - name: app-cors
+      services:
+        - name: synchrotron
+          port: 8008
+          serversTransport: long-lived
+
+    - match: 'Host(`kubesynaps.test.ir`) && PathRegexp(`^/_max/media/`)'
+      kind: Rule
+      priority: 160
+      middlewares:
+        - name: app-cors
+        - name: media-limit
+      services:
+        - name: media-repository
+          port: 8008
+
+    - match: 'Host(`kubesynaps.test.ir`) && PathRegexp(`^/_max/client/(r0|v3)/upload$`)'
+      kind: Rule
+      priority: 160
+      middlewares:
+        - name: app-cors
+        - name: media-limit
+      services:
+        - name: media-repository
+          port: 8008
+
+    - match: 'Host(`kubesynaps.test.ir`) && PathRegexp(`^/_max/client/(r0|v3)/rooms/.*/(messages|members|state)$`)'
+      kind: Rule
+      priority: 155
+      middlewares:
+        - name: app-cors
+      services:
+        - name: client-reader
+          port: 8008
+
+    - match: 'Host(`kubesynaps.test.ir`) && PathRegexp(`^/_max/client/(r0|v3)/(profile|directory|search|joined_rooms)/`)'
+      kind: Rule
+      priority: 150
+      middlewares:
+        - name: app-cors
+      services:
+        - name: client-reader
+          port: 8008
+
+    - match: 'Host(`kubesynaps.test.ir`) && PathRegexp(`^/_max/client/(r0|v3|unstable)/notifications$`)'
+      kind: Rule
+      priority: 145
+      middlewares:
+        - name: app-cors
+      services:
+        - name: pusher
+          port: 8008
+
+    - match: 'Host(`kubesynaps.e.ir`) && PathRegexp(`^/_max/client/(r0|v3)/pushers/`)'
+      kind: Rule
+      priority: 145
+      middlewares:
+        - name: app-cors
+      services:
+        - name: pusher
+          port: 8008
+
+    - match: 'Host(`kubesynaps.ke.ir`)'
+      kind: Rule
+      priority: 1
+      middlewares:
+        - name: app-cors
+      services:
+        - name: synapse-main
+          port: 8008
+---
+apiVersion: traefik.io/v1alpha1
+kind: IngressRoute
+metadata:
+  name: api-kubemax
+  namespace: max
+spec:
+  entryPoints:
+    - websecure
+  tls:
+    certResolver: letsencrypt
+  routes:
+    - match: 'Host(`apikubemax.test.ir`) || Host(`devmaxapi.test.ir`)'
+      kind: Rule
+      middlewares:
+        - name: app-cors
+      services:
+        - name: prodbackend
+          port: 9001
+---
+apiVersion: traefik.io/v1alpha1
+kind: IngressRoute
+metadata:
+  name: devmaxlive
+  namespace: max
+spec:
+  entryPoints:
+    - websecure
+  tls:
+    certResolver: letsencrypt
+  routes:
+    - match: 'Host(`x.test.ir`) && Path(`/livekit/sfu/get`)'
+      kind: Rule
+      priority: 200
+      middlewares:
+        - name: sfu-config-path
+      services:
+        - name: prodbackend
+          port: 9001
+
+    - match: 'Host(`livekubemax.test.ir`) && PathPrefix(`/livekit/sfu/`)'
+      kind: Rule
+      priority: 100
+      middlewares:
+        - name: strip-livekit-sfu
+      services:
+        - name: livekit
+          port: 7880
+          serversTransport: long-lived
+
+    - match: 'Host(`livekubemax.test.ir`) && PathPrefix(`/jwt`)'
+      kind: Rule
+      priority: 100
+      middlewares:
+        - name: strip-jwt
+      services:
+        - name: livekit-jwt
+          port: 8080
+---
+apiVersion: traefik.io/v1alpha1
+kind: IngressRoute
+metadata:
+  name: public-http-redirect
+  namespace: max
+spec:
+  entryPoints:
+    - web
+  routes:
+    - match: 'Host(`kubesynaps.e.ir`) || Host(`apikubemax..ir`) || Host(`devmaxapi.kone.ir`) || Host(`livekubemax.kone.ir`) || Host(`kubemax.e.ir`)'
+      kind: Rule
+      middlewares:
+        - name: redirect-https
+      services:
+        - name: synapse-main
+          port: 8008
